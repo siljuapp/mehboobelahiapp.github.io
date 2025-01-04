@@ -558,3 +558,13 @@ div.bottom-tabs {
     transform: scale(0.8);
     /* Slight shrink on click */
 }
+
+.page.mocks .total-que,
+.page.mocks .selected-tags-section {
+    display: none;
+}
+
+.page.mocks:has(.selected-tags-list .tag-item) .total-que,
+.page.mocks:has(.selected-tags-list .tag-item) .selected-tags-section {
+    display: block;
+}

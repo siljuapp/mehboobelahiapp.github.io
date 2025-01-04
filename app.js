@@ -42,8 +42,10 @@ let temp_userdata = {};
 async function loadApp() {
     // save the page load url to check for shared items
     load_url = window.location.href;
-    if (load_url.indexOf("/mcq/") !== -1) {
-        popupAlert("It seems you have a shared MCQ link, please wait while we load the question", 10);
+    if (/\/mocks\/shared_mock\/.+/.test(load_url)) {
+        popupAlert("Shared Mock Test URL found;The shared mock will be run once app loading is compeleted.;  ;Mock Test Loading...", 10);
+    } else if (/\/mcq\/filter-mcqs\/.+/.test(load_url)) {
+        popupAlert("Shared Filtered MCQs URL found; ;Filtered MCQs Loading ...", 10);
     }
 
     // check for new app version
@@ -53,7 +55,7 @@ async function loadApp() {
         localStorage.setItem("esa_app_version", "elahi_new_app_v1.2");
     }
 
-    app_version = "V1.5";
+    app_version = "Version 1.6 [ Jan 4th 2025 ]";
     document.querySelector(".app-version").textContent = app_version;
 
     // Set the exam based on local storage or URL parameter
@@ -84,7 +86,6 @@ async function loadApp() {
 
     openTab("home"); // To set the home page url
     loadMCQsPage();
-    loadMocksPage();
 
     if (userdata != {}) {
         openTab("mcq");
@@ -104,11 +105,35 @@ async function loadApp() {
         let tags = tags_string.split("__");
         tags = tags.map((tag) => tag.replace("_", " "));
         let operator = tags.pop().toLowerCase();
-        debugger;
+
         let applied_filters = { tags: tags, operator: operator };
         applyFilterInMCQs(applied_filters);
+        removePopupAlert();
         return; // return since the all-mcqs sub-pag
     }
+
+    // SHARED MOCK TEST
+    // if the load url has shared mock test
+    // If shared mock test is there, run the mock test before the mock page laoding.
+    // As the mock test will run in a new popup, so no need to load the mock page.
+    // if the url has filtered-mcqs then apply the filters
+    // 1. check if load url is shared_mock url
+    // 2. if yes get the if of the shared mock test and fetch it from firebase
+    // 3. then start a new mock test.
+
+    if (/\/mocks\/shared_mock\/.+/.test(load_url)) {
+        let mock_id = load_url.substring(load_url.lastIndexOf("/") + 1);
+        let ref = database.ref(`${base_data_ref}/shared_mocks`);
+        let data = await getDataFromFirebaseUsingRef(ref);
+        data = data ? data : [];
+
+        let mock_obj = data.find((item) => item.id === mock_id);
+        removePopupAlert();
+        if (mock_obj) startNewMockTest(mock_obj);
+    }
+
+    // Loading at the end to avoid slow loading
+    loadMocksPage();
 }
 
 loadApp();
@@ -401,6 +426,7 @@ function FilterMCQsSectionHTML() {
                         onClick={(event) => {
                             //filterMcqsByTag("all", event)
                             event.target.closest(".subject").classList.toggle("active");
+                            document.querySelector(".page.mcq .selected-tags-list").innerHTML = "";
                         }}
                     >
                         All
@@ -416,6 +442,7 @@ function FilterMCQsSectionHTML() {
                                          border h-full min-w-[fit-content] text-gray-500 rounded-md px-2 py-1 cursor-pointer`}
                             onClick={(event) => {
                                 event.target.closest(".subject").classList.toggle("active");
+                                document.querySelector(".page.mcq .selected-tags-list").innerHTML = "";
                             }}
                         >
                             {capitalFirstLetterOfEachWord(subject)}
@@ -462,7 +489,7 @@ function FilterMCQsSectionHTML() {
                         </button>
                         <div className="block share-filtered-mcqs w-full h-full my-4">
                             <div className="flex justify-start items-start gap-2 w-full h-full link cursor-pointer" onClick={(event) => createFilteredMCQsURL(event)}>
-                                <i class="bi bi-share"></i>
+                                <i className="bi bi-share"></i>
                                 <span className="text-sm">Share Filtered MCQs</span>
                             </div>
                         </div>
@@ -730,8 +757,8 @@ function ChapterWiseMcqTagItemHTML({ tag_item, level }) {
     );
 }
 
-function updateFilteredMCQsCount(type) {
-    if (type == "mock") return;
+function updateFilteredMCQsCount(page, page_class) {
+    if (page == "mock") return;
 
     let selected_tags_section = document.querySelector(".page.mcq .sub-page.filter-mcqs .selected-tags-section");
     let selected_tags = selected_tags_section.querySelector(".selected-tags-list").querySelectorAll(".tag-item");
@@ -809,8 +836,10 @@ function loadAllTags() {
     // Convert the map to the desired array of objects
     all_tags_object = Array.from(tagMap, ([name, count]) => ({ name, count }));
 }
-function LoadAllTagsHTML() {
+function LoadAllTagsHTML(from) {
     let ignore_tags = ["mock", "mcqs", "practice", "random", "random-mcq"];
+
+    if (all_tags_object.length == 0) loadAllTags();
     return (
         <div className="all-tags-list-inner flex justify-start items-center gap-2 flex-wrap h-full max-h-[250px] overflow-y-scroll w-full px-2 py-4 mb-[20px] border-t">
             {all_tags_object.map((tag, index) => {
@@ -832,9 +861,27 @@ function LoadAllTagsHTML() {
     );
 }
 
-function addTagInTheSelectedTagsSectionOfFilterMCQs(tag) {
-    let selected_subjects_ele = document.querySelector(".page.mcq .sub-page.filter-mcqs .subject-div .subject.active");
-    if (selected_subjects_ele) selected_subjects_ele.classList.remove("active");
+function addTagInTheSelectedTagsSectionOfFilterMCQs(tag, event) {
+    let page = "";
+    let page_class = "";
+
+    if (!event) {
+        page = "mcq";
+        page_class = ".page.mcq";
+    } else if (event.target.closest(".page.mocks")) {
+        page = "mock";
+        page_class = ".page.mocks";
+    } else if (event.target.closest(".page.mcq")) {
+        page = "mcq";
+        page_class = ".page.mcq";
+    }
+
+    let selected_subjects_ele = document.querySelectorAll(`${page_class}  .subject-div .subject.active`);
+    if (selected_subjects_ele) {
+        selected_subjects_ele.forEach((ele) => {
+            ele.classList.remove("active");
+        });
+    }
 
     let div = document.createElement("div");
     div.className = "tag-item border border-blue-500 rounded-md px-2 py-1 flex justify-center items-center gap-2";
@@ -846,8 +893,13 @@ function addTagInTheSelectedTagsSectionOfFilterMCQs(tag) {
         div.remove();
         updateFilteredMCQsCount(event);
     });
-    document.querySelector(".page.mcq .sub-page.filter-mcqs .selected-tags-list").appendChild(div);
-    updateFilteredMCQsCount();
+    if (page === "mcq") {
+        document.querySelector(".page.mcq .sub-page.filter-mcqs .selected-tags-list").appendChild(div);
+    }
+    if (page === "mock") {
+        document.querySelector(".page.mocks .sub-page.new-mock .selected-tags-list").appendChild(div);
+    }
+    updateFilteredMCQsCount(page);
 }
 
 function loadBookmarkedMCQs(event) {
@@ -1433,13 +1485,14 @@ async function getUpdatedAppDataFromFirebase() {
         return;
     }
 
-    let [mcqs, mcq_tags_list, static_mocks, linked_blocks_text] = await Promise.all([getMCQsData(), getMCQTagsList(), getStaticMocks(), getLinkedBlocksTextData()]);
+    let [mcqs, mcq_tags_list, static_mocks, linked_blocks_text, notes_pages] = await Promise.all([getMCQsData(), getMCQTagsList(), getStaticMocks(), getLinkedBlocksTextData(), getNotesPagesData()]);
 
     app_data = {
         mcqs: mcqs ? mcqs : [],
         mcq_tags_list: mcq_tags_list ? mcq_tags_list : [],
         static_mocks: static_mocks ? static_mocks : [],
         linked_blocks_text: linked_blocks_text ? linked_blocks_text : [],
+        notes_pages: notes_pages ? notes_pages : [],
     };
     localStorage.setItem(`esa_${exam}_app_data`, JSON.stringify(app_data));
     console.log(`esa: fresh app_data is loaded into local storage `);
@@ -1479,6 +1532,13 @@ async function getStaticMocks() {
 
 async function getLinkedBlocksTextData() {
     let ref = database.ref(`${base_data_ref}/linked_blocks_text`);
+    let data = await getDataFromFirebaseUsingRef(ref);
+    data = data ? data : [];
+    return data;
+}
+
+async function getNotesPagesData() {
+    let ref = database.ref(`${base_data_ref}/notes_pages`);
     let data = await getDataFromFirebaseUsingRef(ref);
     data = data ? data : [];
     return data;
@@ -1590,7 +1650,8 @@ function popupAlert(message, time_in_sec, color) {
 
     var div = document.createElement("div");
     document.body.append(div);
-    div.className = `me-popup-alert-top w-full fixed top-5 left-0 right-0 flex justify-center z-10000`;
+    div.className = `me-popup-alert-top w-full fixed top-5 left-0 right-0 flex justify-center z-11001`;
+    // z-index is 11001 because the me-overlay has z-index 11000.
     ReactDOM.render(<PopupAlertHTMLMessage message={message} color={color} time_in_sec={time_in_sec} />, div);
 
     if (time_in_sec) {
@@ -1962,7 +2023,7 @@ function NewMockPageHTML() {
             </div>
 
             <div className="block subject-div h-full w-full overflow-x-auto py-2 px-4 mt-5">
-                <span className="h-full w-full text-md font-semibold">Give mock test for subject:</span>
+                <span className="h-full w-full text-md font-semibold">Give mock test for subject(s):</span>
                 <div className="flex space-x-4 py-2 ">
                     {subjects[exam].map((subject, index) => (
                         <span
@@ -1971,6 +2032,7 @@ function NewMockPageHTML() {
                             onClick={(event) => {
                                 //selectSubjectForMock(subject, event)
                                 event.target.closest(".subject").classList.toggle("active");
+                                document.querySelector(".mocks.page .selected-tags-list").innerHTML = "";
                             }}
                         >
                             {capitalFirstLetterOfEachWord(subject)}
@@ -1983,40 +2045,19 @@ function NewMockPageHTML() {
                 </div>
             </div>
 
-            <div className="hide block h-full w-full mt-7">
-                <div className="flex justify-start items-center gap-2 w-full">
-                    <span className="  text-xl p-2 m-2  text-gray-800 font-bold"> Customise Mock Test </span>
+            <div className="block h-full w-full mt-5 py-2 px-4  border-t">
+                <div className="block h-full w-full">
+                    <span className="h-full w-full text-md font-semibold">Give topic(s) wise mock test:</span>
                 </div>
 
-                <div className="block h-full w-full py-2 px-4 hide">
+                <div className="hide block h-full w-full py-2 px-4 hide">
                     <div className="pyq-based-mock flex justify-start items-center gap-2 w-full">
                         <input type="checkbox" className="check-pyq" />
                         <span className="  text-md  text-gray-500"> Mock based on PYQs </span>
                     </div>
                 </div>
-                <div className="block subject-div h-full w-full overflow-x-auto py-2 px-4 mt-5">
-                    <span className="h-full w-full">Give mock test for subject:</span>
-                    <div className="flex space-x-4 py-2 ">
-                        {subjects[exam].map((subject, index) => (
-                            <span
-                                key={index} // Add a key for each child in the list
-                                className=" subject inline-flex items-center whitespace-nowrap border text-gray-500 h-full rounded-md px-2 py-1 min-w-[fit-content] cursor-pointer"
-                                onClick={(event) => {
-                                    //selectSubjectForMock(subject, event)
-                                    event.target.closest(".subject").classList.toggle("active");
-                                }}
-                            >
-                                {capitalFirstLetterOfEachWord(subject)}
-                            </span>
-                        ))}
-                    </div>
-                    <div className="flex justify-start items-center gap-2 mr-auto">
-                        <i className="bi bi-info-circle text-sm text-gray-400"></i>
-                        <span className="text-sm text-gray-400">Each subject will have 25 questions</span>
-                    </div>
-                </div>
 
-                <div className="flex flex-col justify-start items-center  w-full mx-4 pt-5 mt-5 border-t ">
+                <div className="total-que flex flex-col justify-start items-center  w-full py-4">
                     <div className="flex justify-start items-center gap-2 w-full">
                         <span className="text-md  ">Total questions:</span>
                         <div className="total-questions-for-mock flex space-x-4 py-1 ">
@@ -2038,24 +2079,72 @@ function NewMockPageHTML() {
                             ))}
                         </div>
                     </div>
-                    <div className="flex justify-start items-center gap-2 mr-auto">
-                        <i className="bi bi-info-circle text-sm text-gray-400"></i>
-                        <span className="text-sm text-gray-400">Total questions will apply only for selected tags</span>
+                    <div className="flex justify-start items-start gap-2 mr-auto">
+                        <i className="bi bi-info-circle text-sm text-gray-400 w-[30px]"></i>
+                        <span className="text-sm text-gray-400">Select maximum number of mcqs for mock test. It will be divided equally among the selected tags. By default it will be 50.</span>
                     </div>
                 </div>
             </div>
-            <div className="hide block h-full w-full mt-4">
-                <div className="flex justify-start items-center gap-2 w-full px-4">
-                    <span className="text-md  ">Select Chapters:</span>
-                </div>
-                <div className=" block h-full w-full selected-tags-section px-4 py-4">
-                    <span className="text-md  hide "> Selected Tags:</span>
-                    <div className="flex justify-start items-center gap-2 flex-wrap w-full selected-tags-list"></div>
-                </div>
-                <div className="flex justify-center items-center gap-2  h-auto py-2  w-full px-4">
-                    <div className="flex justify-center items-center gap-2  w-full rounded-md px-2 py-1 border border-gray-500 ">
-                        <i className="bi bi-funnel"></i>
-                        <input type="text" className="filter-mcq-input p-1 align-middle focus:outline-none text-sm" placeholder="Filter mcqs by tags" onKeyUp={(event) => filterMcqTagItemsByInput(event)} />
+
+            <div className="block h-full w-full mt-4 ">
+                <div className="block filter-by-tags h-full w-full ">
+                    <div className="flex flex-col justify-start items-start w-full  px-3 ">
+                        <div className="block h-full w-full selected-tags-section bg-violet-100 px-3 py-2 rounded-md">
+                            <div className="flex justify-center items-center gap-2 h-full w-full py-1 my-2">
+                                <span className="mr-auto text-gray-700"> Selected Tags:</span>
+                                <div className="hide and-or-operation flex justify-center items-center gap-2 mr-4">
+                                    <span
+                                        className="cursor-pointer active text-sm or"
+                                        onClick={(event) => {
+                                            switchAndOrOperators("or", event);
+                                        }}
+                                    >
+                                        OR
+                                    </span>
+                                    <span
+                                        className="cursor-pointer  text-sm and"
+                                        onClick={(event) => {
+                                            switchAndOrOperators("and", event);
+                                        }}
+                                    >
+                                        {" "}
+                                        AND
+                                    </span>
+                                </div>
+                            </div>
+                            <div className="selected-tags-list flex justify-start items-center flex-wrap gap-2 my-2"></div>
+                            <span className="text-sm text-gray-500 filtered-mcq-count h-full w-full py-2"></span>
+                            <button className=" hide bg-gray-500 text-white  rounded-md px-2 py-2 cursor-pointer h-full my-2 w-full text-sm" onClick={(event) => filterMcqsBySelectedTags(event)}>
+                                filter mcqs by selected tags
+                            </button>
+                            <div className="hide block share-filtered-mcqs w-full h-full my-4">
+                                <div className="flex justify-start items-start gap-2 w-full h-full link cursor-pointer" onClick={(event) => createFilteredMCQsURL(event)}>
+                                    <i className="bi bi-share"></i>
+                                    <span className="text-sm">Share Filtered MCQs</span>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div className="flex justify-center items-center gap-2  h-auto py-2  w-full">
+                            <div className="flex justify-center items-center gap-2  w-full rounded-md px-2 py-1 border border-gray-500 ">
+                                <i className="bi bi-funnel"></i>
+                                <input type="text" className="filter-mcq-input p-1 align-middle focus:outline-none text-sm" placeholder="Search for tags and chapters" onKeyUp={(event) => filterMcqTagItemsByInput(event)} />
+                            </div>
+                        </div>
+                    </div>
+                    <div className="block h-full w-full">
+                        <div className="flex flex-col justify-center items-center gap-2 h-full w-full">
+                            <div className="flex justify-center items-center gap-2 w-full px-4 py-3">
+                                <span className="text-gray-500  text-md font-semibold text-no-wrap w-full">Tags and Chapters</span>
+                                <div className="icons flex justify-end items-center gap-2 w-full ml-auto mr-[20px] link">
+                                    <i className="bi bi-sort-alpha-down text-xl cursor-pointer" onClick={(event) => sortAllTags("az")}></i>
+                                    <i className="bi bi-sort-alpha-down-alt text-xl cursor-pointer" onClick={(event) => sortAllTags("za")}></i>
+                                    <i className="bi bi-sort-numeric-down text-xl cursor-pointer" onClick={(event) => sortAllTags("19")}></i>
+                                    <i className="bi bi-sort-numeric-down-alt text-xl cursor-pointer" onClick={(event) => sortAllTags("91")}></i>
+                                </div>
+                            </div>
+                            <div className="all-tags-list block h-full w-full p-2 ">{LoadAllTagsHTML("new mock page")}</div>
+                        </div>
                     </div>
                 </div>
             </div>
@@ -2091,22 +2180,9 @@ function getNewMockTextObject() {
         que_ids: [],
     };
 
-    let total_questions = document.querySelector(".total-questions-for-mock-item.active");
-    if (total_questions) {
-        total_questions = parseInt(total_questions.textContent);
-    } else {
-        total_questions = 100;
-    }
-    console.log("total questions", total_questions);
-
-    let selected_subjects = [];
-    let eles = document.querySelectorAll(".new-mock .subject.active");
-    if (eles.length > 0) {
-        eles.forEach((subject) => {
-            selected_subjects.push(subject.textContent.toLowerCase().trim());
-        });
-    }
-    console.log("selected subjects", selected_subjects);
+    // Selected Tags mock test.
+    // When tag is selected, then we ignore the selected subject
+    // Only selected tag mock is run
 
     let selected_tags = [];
     let selected_tags_eles = document.querySelectorAll(".new-mock .selected-tags-list .tag-name");
@@ -2117,6 +2193,84 @@ function getNewMockTextObject() {
     }
     console.log("selected tags", selected_tags);
 
+    let total_questions = document.querySelector(".total-questions-for-mock-item.active");
+    if (total_questions) {
+        total_questions = parseInt(total_questions.textContent);
+    } else {
+        total_questions = 50;
+    }
+    console.log("total questions", total_questions);
+
+    if (selected_tags.length > 0) {
+        // create mock object based on the selected tags
+        // Calculate the number of questions per tag
+        let questions_per_tag = Math.floor(total_questions / selected_tags.length);
+        let remaining_questions = total_questions % selected_tags.length; // Handle leftover questions
+        let selected_mcqs = [];
+
+        selected_tags.forEach((tag, index) => {
+            // Filter questions matching the tag
+            let tag_questions = que_data.filter((mcq) => mcq.tags.includes(tag));
+
+            // Sort the filtered mcqs
+            tag_questions = sortArrayRandomly(tag_questions);
+            tag_questions = sortArrayRandomly(tag_questions);
+
+            // Determine the number of questions to fetch for this tag
+            let num_to_fetch = questions_per_tag + (remaining_questions > 0 ? 1 : 0);
+
+            // Add the questions to the selected_mcqs array (up to the required amount)
+            selected_mcqs.push(...tag_questions.slice(0, num_to_fetch));
+
+            // Deduct one from remaining_questions if used
+            if (remaining_questions > 0) remaining_questions--;
+
+            // Avoid duplicates by using a Set (optional but useful for large datasets)
+            selected_mcqs = [...new Set(selected_mcqs)];
+        });
+
+        selected_mcqs.forEach((mcq) => {
+            obj.que_ids.push(mcq.id);
+        });
+
+        return obj;
+    }
+
+    //
+    // After Tags next preference is given to the subjects
+    // Select subject based mock test
+    //
+
+    let selected_subjects = [];
+    let eles = document.querySelectorAll(".new-mock .subject.active");
+    if (eles.length > 0) {
+        eles.forEach((subject) => {
+            selected_subjects.push(subject.textContent.toLowerCase().trim());
+        });
+    }
+    console.log("selected subjects", selected_subjects);
+
+    if (selected_subjects.length > 0) {
+        let arr = [];
+        const getQuestionsBySubject = (subject) => {
+            const filteredQuestions = que_data.filter((que) => que.tags.includes(subject));
+            const shuffledQuestions = sortArrayRandomly(filteredQuestions);
+            return shuffledQuestions.slice(0, 25);
+        };
+
+        selected_subjects.forEach((subject) => {
+            arr = arr.concat(getQuestionsBySubject(subject));
+        });
+
+        // Set question IDs in the object
+        obj.que_ids = arr.map((que) => que.id);
+        return obj;
+    }
+
+    //
+    // When no tag or subject is selected
+    // Run a normal mock test
+    //
     if (selected_subjects.length === 0 && selected_tags.length === 0) {
         let arr = [];
 
@@ -2138,22 +2292,6 @@ function getNewMockTextObject() {
 
         // Randomize the final array (optional)
         //arr = sortArrayRandomly(arr);
-
-        // Set question IDs in the object
-        obj.que_ids = arr.map((que) => que.id);
-        return obj;
-    }
-    if (selected_subjects.length > 0) {
-        let arr = [];
-        const getQuestionsBySubject = (subject) => {
-            const filteredQuestions = que_data.filter((que) => que.tags.includes(subject));
-            const shuffledQuestions = sortArrayRandomly(filteredQuestions);
-            return shuffledQuestions.slice(0, 25);
-        };
-
-        selected_subjects.forEach((subject) => {
-            arr = arr.concat(getQuestionsBySubject(subject));
-        });
 
         // Set question IDs in the object
         obj.que_ids = arr.map((que) => que.id);
@@ -2204,14 +2342,14 @@ function MockTestOverlayHTML({ mock_obj }) {
         <div className="container mock-overlay-inner h-full">
             <div className="sticky top-0 flex justify-start items-center h-[65px] w-full overflow-x-auto p-4 bg-violet-200  gap-2">
                 <div className="timer  flex justify-center items-center gap-2 bg-black text-white rounded-md px-2 py-1">
-                    <i className="fa-regular fa-clock"></i>
+                    <i className="bi bi-clock"></i>
                     <span className="text-sm timer-text">{"19:00"}</span>
                 </div>
-                <span className="correct bg-green-500  text-white  py-1 px-2 rounded-md">+2</span>
-                <span className=" wrong bg-red-500  text-white rounded-md px-2 py-1">0.6</span>
-                <div className="share hide link flex items-center gap-1">
-                    <i className="fa-solid fa-share"></i>
-                    <span>Share</span>
+                <span className="hide correct bg-green-500  text-white  py-1 px-2 rounded-md">+2</span>
+                <span className="hide wrong bg-red-500  text-white rounded-md px-2 py-1">0.6</span>
+                <div className="share link flex items-center gap-1 border bg-white py-1 px-2 rounded-md cursor-pointer" onClick={(event) => createSharedMockTestUrl(mock_obj)}>
+                    <i className="bi bi-share"></i>
+                    <span className="">Share</span>
                 </div>
                 <span className="text-sm bg-blue-700 font-bold  text-white text-no-wrap  rounded-md px-3 py-1 mx-2 ml-auto cursor-pointer" onClick={(event) => submitMockTest(event, mock_obj)}>
                     Submit
@@ -2283,6 +2421,29 @@ function CloseMockTestPopupHTML({ overlay }) {
         </div>
     );
 }
+
+async function createSharedMockTestUrl(mock_obj) {
+    let ref = database.ref(`${base_data_ref}/shared_mocks`);
+    let data = await getDataFromFirebaseUsingRef(ref);
+    data = data ? data : [];
+
+    let index = data.findIndex((item) => item.id === mock_obj.id);
+    if (index === -1) {
+        // If not found, add the mock_obj to the data
+        data.push(mock_obj);
+        console.log("Mock object added:", mock_obj);
+    } else {
+        console.log("Mock object already exists at index:", index);
+    }
+
+    await ref.set(data);
+
+    let shared_mock_url = window.location.href + `/shared_mock/${mock_obj.id}`;
+    console.log(shared_mock_url);
+    navigator.clipboard.writeText(shared_mock_url);
+    popupAlert("Shared Mock Test URL copied to clipboard", 3, "green");
+}
+
 function closePopup(event) {
     event.target.closest(".popup-container").remove();
 }
